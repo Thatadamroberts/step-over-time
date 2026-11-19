@@ -44,6 +44,9 @@ namespace StepQuest.Core.Session
 
         public BattleSummary LastSummary { get; private set; }
 
+        /// <summary>The UI calls this once the results screen has been seen.</summary>
+        public void DismissSummary() => LastSummary = null;
+
         public GameSession(SaveData data, IClock clock)
         {
             Data = data;
@@ -88,6 +91,7 @@ namespace StepQuest.Core.Session
             if (fromUtc >= nowUtc) return 0;
 
             int earned = 0;
+            long before = Ledger.TotalSteps;
             var cursor = fromUtc;
             while (cursor < nowUtc)
             {
@@ -96,20 +100,22 @@ namespace StepQuest.Core.Session
                 var sliceEnd = nextMidnightUtc < nowUtc ? nextMidnightUtc : nowUtc;
                 if (sliceEnd <= cursor) sliceEnd = nowUtc; // DST/clock oddities
                 long steps = source.ReadSteps(cursor, sliceEnd);
-                if (steps < 0) return earned; // source unavailable: try again later, don't advance the sync point
+                if (steps < 0) break; // source unavailable: try again later, don't advance the sync point
                 if (steps > 0) earned += Ledger.AddSteps(steps, cursor, sliceEnd, local.Date);
                 else Ledger.LastSyncUtcTicks = Math.Max(Ledger.LastSyncUtcTicks, sliceEnd.Ticks);
                 cursor = sliceEnd;
             }
-            AfterSteps(earned);
+            // Only notify listeners (UI refresh, autosave) when steps actually arrived.
+            if (Ledger.TotalSteps != before) AfterSteps(earned);
             return earned;
         }
 
         /// <summary>Live updates from the hardware step counter while the app is open.</summary>
         public int OnRawStepCounter(long raw)
         {
+            long before = Ledger.TotalSteps;
             int earned = Ledger.AddRawSensorReading(raw, _clock.UtcNow, _clock.LocalNow.Date);
-            AfterSteps(earned);
+            if (Ledger.TotalSteps != before) AfterSteps(earned);
             return earned;
         }
 
