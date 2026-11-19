@@ -1,0 +1,23 @@
+# Unity
+StepQuest/[Ll]ibrary/
+StepQuest/[Tt]emp/
+StepQuest/[Oo]bj/
+StepQuest/[Bb]uild/
+StepQuest/[Bb]uilds/
+StepQuest/[Ll]ogs/
+StepQuest/[Uu]ser[Ss]ettings/
+StepQuest/MemoryCaptures/
+StepQuest/*.csproj
+StepQuest/*.sln
+StepQuest/*.apk
+StepQuest/*.aab
+StepQuest/.vs/
+StepQuest/.idea/
+# Android plugin build output
+**/StepBridge.androidlib/build/
+**/.gradle/
+# .NET test project
+CoreTests/bin/
+CoreTests/obj/
+CoreTests/TestResults/
+.DS_Store
