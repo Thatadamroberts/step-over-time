@@ -29,14 +29,22 @@ import java.util.concurrent.TimeUnit
 data class Snapshot(
     val lastSyncMs: Long = 0, val banked: Int = 0, val remainder: Int = 0,
     val todaySteps: Int = 0, val todayStartMs: Long = 0, val streak: Int = 0, val notifications: Boolean = true,
+    /** Steps needed today before actions unlock (80% of goal), and actions already waiting on it. */
+    val threshold: Int = 0, val locked: Int = 0,
 ) {
     fun save(c: Context) = StepStore.prefs(c).edit()
         .putLong("snap_sync", lastSyncMs).putInt("snap_banked", banked).putInt("snap_remainder", remainder)
         .putInt("snap_today", todaySteps).putLong("snap_today_start", todayStartMs).putInt("snap_streak", streak)
-        .putBoolean("snap_notify", notifications).apply()
+        .putBoolean("snap_notify", notifications).putInt("snap_threshold", threshold).putInt("snap_locked", locked).apply()
 
     fun pending(c: Context, now: Long) = if (lastSyncMs <= 0) 0 else StepStore.stepsBetween(c, lastSyncMs, now)
-    fun actions(c: Context, now: Long) = banked + ((remainder + pending(c, now)) / 1000).toInt()
+    private fun newActions(c: Context, now: Long) = ((remainder + pending(c, now)) / 1000).toInt()
+    private fun lockedToday(now: Long) = if (todayStartMs == startOfDay(now)) locked else 0
+    fun unlocked(c: Context, now: Long) = threshold <= 0 || today(c, now) >= threshold
+    /** Usable actions: earned ones only count once today has reached 80% of the goal. */
+    fun actions(c: Context, now: Long) = if (unlocked(c, now)) banked + lockedToday(now) + newActions(c, now) else banked
+    fun lockedNow(c: Context, now: Long) = if (unlocked(c, now)) 0 else lockedToday(now) + newActions(c, now)
+    fun toUnlock(c: Context, now: Long) = maxOf(0, threshold - today(c, now))
     fun toNext(c: Context, now: Long) = (1000 - (remainder + pending(c, now)) % 1000).toInt()
     fun today(c: Context, now: Long): Int {
         val start = startOfDay(now)
@@ -47,7 +55,8 @@ data class Snapshot(
     companion object {
         fun load(c: Context) = StepStore.prefs(c).let { p ->
             Snapshot(p.getLong("snap_sync", 0), p.getInt("snap_banked", 0), p.getInt("snap_remainder", 0),
-                p.getInt("snap_today", 0), p.getLong("snap_today_start", 0), p.getInt("snap_streak", 0), p.getBoolean("snap_notify", true))
+                p.getInt("snap_today", 0), p.getLong("snap_today_start", 0), p.getInt("snap_streak", 0), p.getBoolean("snap_notify", true),
+                p.getInt("snap_threshold", 0), p.getInt("snap_locked", 0))
         }
         fun startOfDay(ms: Long): Long = Calendar.getInstance().apply {
             timeInMillis = ms; set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
@@ -134,7 +143,10 @@ class StepWidgetProvider : AppWidgetProvider() {
             return RemoteViews(c.packageName, R.layout.sq_widget).apply {
                 setTextViewText(R.id.sq_widget_steps, nf.format(s.today(c, now)))
                 setTextViewText(R.id.sq_widget_actions, s.actions(c, now).toString())
-                setTextViewText(R.id.sq_widget_next, nf.format(toNext) + " steps to next action")
+                val lockedNow = s.lockedNow(c, now)
+                setTextViewText(R.id.sq_widget_next,
+                    if (!s.unlocked(c, now)) "${nf.format(s.toUnlock(c, now))} more steps to unlock" + (if (lockedNow > 0) " $lockedNow" else "")
+                    else nf.format(toNext) + " steps to next action")
                 setProgressBar(R.id.sq_widget_progress, 1000, 1000 - toNext, false)
                 setTextViewText(R.id.sq_widget_streak, if (s.streak > 0) "🔥 ${s.streak}" else "")
                 c.packageManager.getLaunchIntentForPackage(c.packageName)?.let {

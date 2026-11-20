@@ -66,6 +66,19 @@ fun HomeScreen(nav: Nav, stepPermission: Boolean, requestPermission: () -> Unit)
                         Tiny("Every 1,000 steps = 1 action in battle")
                     }
                 }
+                if (!s.todayUnlocked) {
+                    Spacer(Modifier.height(8.dp))
+                    RowC {
+                        Icon("lock", 20.dp)
+                        Small(
+                            (if (s.lockedActions > 0) "${s.lockedActions} action${if (s.lockedActions == 1) "" else "s"} locked. " else "") +
+                                "Walk ${n(s.stepsToUnlock)} more steps today to reach 80% of your goal and unlock today's actions.",
+                            Sq.text, Modifier.padding(start = 6.dp))
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Bar(s.todaySteps / StepLedger.STEPS_PER_ACTION.toFloat() / (s.ledger.unlockThreshold / 1000f).coerceAtLeast(0.001f), Sq.gold, 12.dp,
+                        label = "${n(s.todaySteps)} / ${n(s.ledger.unlockThreshold)} to unlock")
+                }
             }
             val goal = s.data.settings.dailyStepGoal
             Panel(inset = true) {

@@ -95,6 +95,7 @@ fun PartyScreen(nav: Nav) {
 
 @Composable
 private fun HeroDetail(nav: Nav, index: Int, back: () -> Unit) {
+    @Suppress("UNUSED_VARIABLE") val v = Game.version // re-read session state on every change
     val s = Game.session
     val h = s.party[index]
     val st = h.totalStats()
@@ -271,6 +272,7 @@ fun QuestsScreen(nav: Nav) {
 
 @Composable
 private fun QuestCard(q: QuestDef) {
+    @Suppress("UNUSED_VARIABLE") val v = Game.version // re-read session state on every change
     val s = Game.session
     val progress = s.questProgress(q)
     val claimed = s.isClaimed(q)
@@ -340,6 +342,7 @@ fun TrophiesScreen(nav: Nav) {
 
 @Composable
 private fun TrophyRow(a: AchievementDef) {
+    @Suppress("UNUSED_VARIABLE") val v = Game.version // re-read session state on every change
     val s = Game.session
     val done = s.isUnlocked(a)
     val p = s.achievementProgress(a)
@@ -385,7 +388,8 @@ fun SettingsScreen(nav: Nav, stepPermission: Boolean, requestPermission: () -> U
             Spacer(Modifier.height(8.dp))
             Small("Daily goal: ${n(goal.toInt() * 1000)} steps", Sq.text)
             Slider(goal, { goal = it }, valueRange = 2f..30f, steps = 27, onValueChangeFinished = { s.setStepGoal(goal.toInt() * 1000) }, colors = sliderColors)
-            Tiny("Your streak counts days you reach this goal.")
+            Tiny("Actions earned each day unlock once you reach 80% of this goal (${n(com.stepquest.core.session.GameSession.unlockThreshold(goal.toInt() * 1000))} steps). " +
+                "If a day ends below that, its locked actions are lost. Your streak counts days you reach the full goal.")
         }
         Panel {
             H2("Notifications & tracking")

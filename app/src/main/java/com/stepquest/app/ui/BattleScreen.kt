@@ -82,12 +82,15 @@ fun BattleScreen(nav: Nav) {
     var summaryShown by remember { mutableStateOf<BattleSummary?>(null) }
     val stage = nav.stage
 
-    val b = s.battle
+    // The session clears the battle the moment the last blow lands, so keep the battle being
+    // animated on screen until its playback finishes; only then show the results.
+    var playing by remember { mutableStateOf<Battle?>(null) }
+    val b = s.battle ?: playing
     LaunchedEffect(b == null) { if (b != null) stage.showBattle(b) }
-    LaunchedEffect(b, s.lastSummary, busy) {
+    LaunchedEffect(s.battle, s.lastSummary, busy) {
         if (busy) return@LaunchedEffect
         val sum = s.lastSummary
-        if (b == null) {
+        if (s.battle == null) {
             if (sum != null && summaryShown !== sum) { summaryShown = sum; showResults(nav, sum) }
             else if (sum == null && nav.dialog == null) nav.screen = Screen.Home
         }
@@ -102,6 +105,7 @@ fun BattleScreen(nav: Nav) {
         val element = if (cmd.kind == CommandKind.Skill) GameData.skill(cmd.skillId!!).element
             else GameData.classDef(b.heroClasses[b.currentActor!!.heroIndex]).weaponElement
         b.units.forEach { shownHp[it.id] = it.hp; shownMp[it.id] = it.mp }
+        playing = b
         val events = runCatching { s.command(cmd) }.getOrElse { Game.toast(it.message ?: "Can't do that"); shownHp.clear(); shownMp.clear(); return }
         mode = Mode.Root; pending = null; busy = true
         stage.highlight = -1
@@ -119,7 +123,9 @@ fun BattleScreen(nav: Nav) {
                     else -> {}
                 }
             }
+            if (s.battle == null) kotlinx.coroutines.delay(700) // let the finishing blow sink in
             shownHp.clear(); shownMp.clear()
+            playing = null
             busy = false
             Game.refresh()
         }
@@ -196,6 +202,8 @@ fun BattleScreen(nav: Nav) {
                 Panel(glow = true) {
                     H2("Out of actions")
                     Small("Your party holds its ground. Every 1,000 steps you walk gives them another action — the battle will wait for you.", Sq.text)
+                    if (!s.todayUnlocked) Small("Today's actions unlock once you reach 80% of your goal: ${n(s.stepsToUnlock)} more steps" +
+                        (if (s.lockedActions > 0) " (${s.lockedActions} waiting)." else "."), Sq.gold)
                     Spacer(Modifier.height(6.dp))
                     Btn("Return to town", Modifier.fillMaxWidth()) { nav.screen = Screen.Home }
                     if (s.data.settings.debugTools) Btn("+1k steps (debug)", small = true, ghost = true) { s.addDebugSteps(1000) }

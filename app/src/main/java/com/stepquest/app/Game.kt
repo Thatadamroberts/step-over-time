@@ -37,6 +37,8 @@ object Game {
     var version by mutableIntStateOf(0)
         private set
     val toasts = mutableStateListOf<Toast>()
+    private var lastLocked = 0
+    private fun n(v: Int) = "%,d".format(v)
     private var toastId = 0L
 
     val hasSensor get() = StepSampler.hasSensor(app)
@@ -60,6 +62,15 @@ object Game {
         s.onChanged = { save(); version++ }
         s.onActionsEarned = { n -> toast(if (n == 1) "New action earned!" else "$n new actions earned!", "Your walking powers your party.") }
         s.onAchievements = { list -> list.forEach { toast("Trophy: ${it.name}", "${it.description}  +${it.rewardCoins} coins") } }
+        s.onActionsForfeited = { n, _ -> toast("$n locked action${if (n == 1) "" else "s"} expired", "Yesterday ended below 80% of your step goal.") }
+        lastLocked = s.lockedActions
+        val prev = s.onChanged
+        s.onChanged = {
+            prev?.invoke()
+            val locked = s.lockedActions
+            if (locked > lastLocked) toast("Action earned, locked", "Walk ${n(s.stepsToUnlock)} more steps today (80% of your goal) to unlock it.")
+            lastLocked = locked
+        }
     }
 
     fun toast(title: String, body: String? = null) { toasts += Toast(toastId++, title, body) }
@@ -97,7 +108,8 @@ object Game {
         val s = session
         val l = s.ledger
         Snapshot(l.lastSyncMillis, l.bankedActions, l.stepRemainder, s.todaySteps,
-            Snapshot.startOfDay(System.currentTimeMillis()), s.streak.current, s.data.settings.notificationsEnabled).save(app)
+            Snapshot.startOfDay(System.currentTimeMillis()), s.streak.current, s.data.settings.notificationsEnabled,
+            l.unlockThreshold, s.lockedActions).save(app)
         StepWidgetProvider.refreshAll(app)
     }
 

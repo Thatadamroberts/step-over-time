@@ -67,10 +67,72 @@ class StepLedgerTest {
 }
 
 class SessionTest {
-    private fun newSession(offset: Int = 0): Pair<GameSession, FakeClock> {
+    private fun newSession(offset: Int = 0, goal: Int = 1000): Pair<GameSession, FakeClock> {
         val c = FakeClock(START, offset)
-        val d = SaveData.newGame(c.now).also { it.rngState = 12345 }
+        val d = SaveData.newGame(c.now).also { it.rngState = 12345; it.settings.dailyStepGoal = goal }
         return GameSession(d, c) to c
+    }
+
+    // ───────── Daily 80% rule ─────────
+
+    @Test fun actionsStayLockedUntilEightyPercentOfGoal() {
+        val (s, _) = newSession(goal = 5000) // threshold 4,000
+        s.addDebugSteps(3000)
+        assertEquals(0, s.ledger.bankedActions)
+        assertEquals(3, s.lockedActions)
+        assertEquals(1000, s.stepsToUnlock)
+        assertFalse(s.todayUnlocked)
+        s.addDebugSteps(1000) // reaches 4,000: everything unlocks
+        assertEquals(4, s.ledger.bankedActions)
+        assertEquals(0, s.lockedActions)
+        s.addDebugSteps(1000) // past the threshold, new actions are usable immediately
+        assertEquals(5, s.ledger.bankedActions)
+    }
+
+    @Test fun lockedActionsAreLostWhenTheDayEndsShort() {
+        val (s, c) = newSession(goal = 5000)
+        var lost = 0
+        s.onActionsForfeited = { n, _ -> lost += n }
+        s.addDebugSteps(3500)
+        assertEquals(3, s.lockedActions)
+        c.advanceDays(1)
+        s.checkDay()
+        assertEquals(3, lost)
+        assertEquals(0, s.lockedActions)
+        assertEquals(0, s.ledger.bankedActions)
+        // The new day starts fresh: its own 80% applies.
+        s.addDebugSteps(4000)
+        assertEquals(4, s.ledger.bankedActions)
+        assertEquals(500, s.ledger.stepRemainder) // partial progress toward an action still carries over
+    }
+
+    @Test fun catchUpAppliesTheRuleDayByDay() {
+        val (s, c) = newSession(goal = 5000)
+        val src = FakeSteps()
+        src.add(START + 3_600_000, 2000)               // day 1: only 2,000 steps -> locked, then lost
+        src.add(START + 86_400_000L + 3_600_000, 6000)  // day 2: 6,000 steps -> unlocked
+        c.advanceDays(2)
+        s.syncSteps(src)
+        assertEquals(6, s.ledger.bankedActions)
+        assertEquals(2L, s.ledger.totalActionsForfeited)
+    }
+
+    @Test fun loweringTheGoalCanUnlockToday() {
+        val (s, _) = newSession(goal = 10_000) // threshold 8,000
+        s.addDebugSteps(5000)
+        assertEquals(5, s.lockedActions)
+        s.setStepGoal(6000) // threshold 4,800: already met
+        assertEquals(5, s.ledger.bankedActions)
+        assertEquals(0, s.lockedActions)
+    }
+
+    @Test fun lockedRuleSurvivesSaveAndLoad() {
+        val (s, c) = newSession(goal = 5000)
+        s.addDebugSteps(2000)
+        val loaded = GameSession(SaveCodec.decode(SaveCodec.encode(s.data), c.now), c)
+        assertEquals(2, loaded.lockedActions)
+        loaded.addDebugSteps(2000)
+        assertEquals(4, loaded.ledger.bankedActions)
     }
 
     @Test fun catchUpSplitsAtLocalMidnight() {

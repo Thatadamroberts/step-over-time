@@ -113,6 +113,9 @@ private fun TopBar(nav: Nav) {
                 T("ACTIONS", 7.sp, Sq.muted, serif = false)
             }
         }
+        if (s.lockedActions > 0) Column(Modifier.padding(start = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon("lock", 18.dp); T("${s.lockedActions}", 11.sp, Sq.gold, bold = true)
+        }
         Stat("boot", n(s.todaySteps), "steps today", Modifier.weight(1f))
         Stat("coin", n(s.inventory.coins), "gold", Modifier.weight(1f))
         Stat("flame", s.streak.current.toString(), "day streak", Modifier.weight(0.8f))
@@ -139,12 +142,14 @@ private fun StepBar() {
     val l = s.ledger
     Box(Modifier.fillMaxWidth().background(Color(0xFF0A0806)).padding(horizontal = 6.dp, vertical = 3.dp)) {
         Bar(l.stepRemainder / StepLedger.STEPS_PER_ACTION.toFloat(), Color(0xFFB04AD0), 14.dp,
-            label = "${n(l.stepRemainder)} / ${n(StepLedger.STEPS_PER_ACTION)} steps to next action", ticks = 20)
+            label = if (s.todayUnlocked) "${n(l.stepRemainder)} / ${n(StepLedger.STEPS_PER_ACTION)} steps to next action"
+                    else "${n(l.stepRemainder)} / ${n(StepLedger.STEPS_PER_ACTION)} to next · ${n(s.stepsToUnlock)} to unlock today", ticks = 20)
     }
 }
 
 @Composable
 private fun NavBar(nav: Nav) {
+    @Suppress("UNUSED_VARIABLE") val v = Game.version
     val s = Game.session
     val claimable = s.activeQuests.any { !s.isClaimed(it) && s.questProgress(it) >= it.target }
     // Micro-menu: square framed slots, the active one glowing gold.

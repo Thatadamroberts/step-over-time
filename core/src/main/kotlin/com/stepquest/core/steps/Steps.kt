@@ -60,16 +60,63 @@ class StepLedger {
         return true
     }
 
+    // ───────── Daily 80% rule ─────────
+
+    /**
+     * Steps a day needs before its actions unlock (80% of the daily goal; set by GameSession).
+     * 0 disables the rule.
+     */
+    var unlockThreshold: Int = 0
+    /** Actions earned on [lockedDay] that are waiting for that day to reach [unlockThreshold]. */
+    var lockedActions: Int = 0
+    var lockedDay: String = ""
+    /** Locked actions lost because their day ended short of the threshold (for a one-time notice). */
+    var forfeitedActions: Int = 0
+    var forfeitedDay: String = ""
+    var totalActionsForfeited: Long = 0
+
+    fun isUnlocked(day: LocalDate) = unlockThreshold <= 0 || stepsOn(day) >= unlockThreshold
+    fun stepsToUnlock(day: LocalDate) = max(0, unlockThreshold - stepsOn(day))
+
+    /** Moves into [today]: locked actions from an earlier day that never reached the threshold are lost. */
+    fun rollover(today: LocalDate) {
+        if (lockedActions > 0 && lockedDay.isNotEmpty() && lockedDay != dayKey(today)) {
+            forfeitedActions += lockedActions
+            forfeitedDay = lockedDay
+            totalActionsForfeited += lockedActions
+            lockedActions = 0
+        }
+        if (lockedActions == 0) lockedDay = ""
+    }
+
+    /** Re-checks [day] (e.g. after the goal changes): unlocks its actions if it now meets the threshold. Returns actions unlocked. */
+    fun recheck(day: LocalDate): Int {
+        if (lockedActions == 0 || lockedDay != dayKey(day) || !isUnlocked(day)) return 0
+        val n = lockedActions
+        bankedActions += n
+        totalActionsEarned += n
+        lockedActions = 0
+        lockedDay = ""
+        return n
+    }
+
     private fun credit(steps: Long, day: LocalDate): Int {
+        rollover(day)
         totalSteps += steps
         val key = dayKey(day)
         dailySteps[key] = min(Int.MAX_VALUE.toLong(), (dailySteps[key] ?: 0) + steps).toInt()
         val pool = stepRemainder + steps
         val earned = (pool / STEPS_PER_ACTION).toInt()
         stepRemainder = (pool % STEPS_PER_ACTION).toInt()
+        if (earned > 0 && !isUnlocked(day)) {
+            // Below 80% of the goal: hold these until the day catches up.
+            lockedActions += earned
+            lockedDay = key
+            return 0
+        }
         bankedActions += earned
         totalActionsEarned += earned
-        return earned
+        return earned + recheck(day)
     }
 
     companion object {

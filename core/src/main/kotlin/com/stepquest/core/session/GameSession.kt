@@ -54,11 +54,35 @@ class GameSession(val data: SaveData, private val clock: Clock) {
     var onChanged: (() -> Unit)? = null
     var onActionsEarned: ((Int) -> Unit)? = null
     var onAchievements: ((List<AchievementDef>) -> Unit)? = null
+    /** Locked actions were lost because a day ended below 80% of the goal: (count, day). */
+    var onActionsForfeited: ((Int, String) -> Unit)? = null
 
     var lastSummary: BattleSummary? = null
         private set
 
-    init { Quests.refresh(data.quests, clock.today) }
+    init {
+        Quests.refresh(data.quests, clock.today)
+        ledger.unlockThreshold = unlockThreshold(data.settings.dailyStepGoal)
+        ledger.rollover(clock.today)
+    }
+
+    // ───────── Daily 80% rule ─────────
+
+    /** Actions earned today, waiting for today's steps to reach 80% of the goal. */
+    val lockedActions get() = if (ledger.lockedDay == StepLedger.dayKey(clock.today)) ledger.lockedActions else 0
+    val stepsToUnlock get() = ledger.stepsToUnlock(clock.today)
+    val todayUnlocked get() = ledger.isUnlocked(clock.today)
+
+    /** Rolls into a new day; reports locked actions lost because yesterday fell short. Cheap; call often. */
+    fun checkDay() {
+        ledger.rollover(clock.today)
+        if (ledger.forfeitedActions > 0) {
+            val n = ledger.forfeitedActions; val day = ledger.forfeitedDay
+            ledger.forfeitedActions = 0
+            onActionsForfeited?.invoke(n, day)
+            commit()
+        }
+    }
 
     val ledger get() = data.ledger
     val party get() = data.party
@@ -79,6 +103,7 @@ class GameSession(val data: SaveData, private val clock: Clock) {
 
     /** Pulls steps since the last sync, split at local midnights so each day's bucket is right. */
     fun syncSteps(source: StepSource): Int {
+        checkDay()
         val now = clock.nowMillis()
         var cursor = max(ledger.lastSyncMillis, now - MAX_CATCH_UP_DAYS * 86_400_000L)
         if (cursor >= now) return 0
@@ -108,6 +133,7 @@ class GameSession(val data: SaveData, private val clock: Clock) {
 
     private fun afterSteps(earned: Int) {
         Quests.refresh(data.quests, clock.today)
+        if (ledger.forfeitedActions > 0) { val n = ledger.forfeitedActions; ledger.forfeitedActions = 0; onActionsForfeited?.invoke(n, ledger.forfeitedDay) }
         if (earned > 0) onActionsEarned?.invoke(earned)
         checkAchievements()
         commit()
@@ -334,7 +360,13 @@ class GameSession(val data: SaveData, private val clock: Clock) {
         checkAchievements(); commit()
     }
 
-    fun setStepGoal(goal: Int) { data.settings.dailyStepGoal = goal.coerceIn(1000, 50_000); commit() }
+    fun setStepGoal(goal: Int) {
+        data.settings.dailyStepGoal = goal.coerceIn(1000, 50_000)
+        ledger.unlockThreshold = unlockThreshold(data.settings.dailyStepGoal)
+        val unlocked = ledger.recheck(clock.today) // lowering the goal can unlock today's actions
+        if (unlocked > 0) onActionsEarned?.invoke(unlocked)
+        commit()
+    }
 
     fun commit() {
         data.rngState = rng.state
@@ -344,5 +376,8 @@ class GameSession(val data: SaveData, private val clock: Clock) {
     companion object {
         const val MAX_CATCH_UP_DAYS = 30L
         const val DEFEAT_COIN_PENALTY = 0.10
+        /** Actions only unlock on days you walk at least this share of your daily goal. */
+        const val UNLOCK_FRACTION = 0.8
+        fun unlockThreshold(goal: Int) = kotlin.math.ceil(goal * UNLOCK_FRACTION).toInt()
     }
 }
