@@ -194,8 +194,10 @@ fun BattleScreen(nav: Nav) {
                     if (row.size == 1) Spacer(Modifier.weight(1f))
                 }
             }
-            if (log.isNotEmpty() || b.log.isNotEmpty())
-                T(log.ifEmpty { b.log.last().text }, 12.sp, Color(0xFFFFD100), modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp))
+            // While animating, only show lines that have actually played (the session already knows the outcome).
+            val logLine = log.ifEmpty { if (busy) "" else b.log.lastOrNull()?.text ?: "" }
+            if (logLine.isNotEmpty())
+                T(logLine, 12.sp, Color(0xFFFFD100), modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp))
 
             val actor = b.currentActor
             if (s.ledger.bankedActions <= 0 && !busy) {
