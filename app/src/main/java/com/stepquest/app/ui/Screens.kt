@@ -32,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.Color
 import com.stepquest.app.Game
 import com.stepquest.app.art.PixelArt
 import com.stepquest.core.data.GameData
@@ -277,6 +278,9 @@ private fun QuestCard(q: QuestDef) {
     val reward = "+${q.rewardCoins} coins" + (GameData.itemOrNull(q.rewardItem)?.let { " + ${it.name}" } ?: "")
     Card(done = claimed) {
         RowC {
+            // Classic quest markers: "!" in progress, "?" ready to hand in.
+            T(if (claimed) " " else if (done) "?" else "!", 26.sp, if (done && !claimed) Color(0xFFFFD100) else Color(0xFFC9A230), bold = true,
+                modifier = Modifier.width(22.dp))
             H3(q.text, modifier = Modifier.weight(1f))
             if (claimed) { Icon("check", 18.dp); Small(" Claimed", Sq.good) }
             else Btn("Claim", small = true, primary = true, enabled = done) { if (s.claimQuest(q.id)) Game.toast("Quest complete!", reward) }

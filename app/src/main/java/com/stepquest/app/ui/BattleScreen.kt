@@ -3,6 +3,12 @@ package com.stepquest.app.ui
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.drawscope.Stroke
+import com.stepquest.core.party.SkillEffect
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -126,96 +132,137 @@ fun BattleScreen(nav: Nav) {
         pending = cmd; pendingTarget = kind; mode = Mode.Target
     }
 
+    // MMO-style targeting: tap an enemy to target it; offensive abilities go to the current target.
+    var targetId by remember { mutableStateOf(-1) }
+    if (b.unit(targetId)?.let { !it.isHero && it.isAlive } != true) targetId = b.enemies.firstOrNull { it.isAlive }?.id ?: -1
+
+    fun use(cmd: BattleCommand, kind: TargetKind) = when (kind) {
+        TargetKind.SingleEnemy -> if (targetId >= 0) execute(cmd.copy(targetId = targetId)) else Game.toast("No target")
+        TargetKind.SingleAlly, TargetKind.DeadAlly -> beginTarget(cmd, kind)
+        else -> execute(cmd)
+    }
+
     Column(Modifier.fillMaxSize()) {
-        BoxWithConstraints(Modifier.fillMaxWidth().weight(0.46f)) {
+        BoxWithConstraints(Modifier.fillMaxWidth().weight(0.44f).drawWithContent { drawContent(); ironFrame(3.5.dp.toPx(), 0f, rivets = true) }) {
             val w = constraints.maxWidth.toFloat(); val h = constraints.maxHeight.toFloat()
             val unitPx = w / 12f
             Diorama(region, stage, onTapUnit = { id ->
                 if (busy) return@Diorama
                 val unit = b.unit(id) ?: return@Diorama
                 if (mode == Mode.Target && validTargets(b, pendingTarget).any { it.id == id }) pending?.let { execute(it.copy(targetId = id)) }
-                else if (mode == Mode.Root && !unit.isHero && unit.isAlive && s.ledger.bankedActions > 0) execute(BattleCommand.attack(id))
+                else if (!unit.isHero && unit.isAlive) targetId = id
             })
-            // Enemy tags: name, HP, shield pips and discovered weaknesses.
-            for (e in b.enemies) {
-                if (!e.isAlive && !busy) continue
-                if ((stage.fade[e.id] ?: 1f) < 0.05f) continue
+            // Nameplates over enemies, nudged so they never overlap.
+            val density = LocalDensity.current
+            val plateW = with(density) { 96.dp.toPx() }; val plateH = with(density) { 26.dp.toPx() }
+            val placed = mutableListOf<Pair<Float, Float>>()
+            for (e in b.enemies.sortedByDescending { stage.anchor(it.id, w, h, unitPx)?.y ?: 0f }) {
+                if ((!e.isAlive && !busy) || (stage.fade[e.id] ?: 1f) < 0.05f) continue
                 val anchor = stage.anchor(e.id, w, h, unitPx) ?: continue
-                EnemyTag(b, e, shownHp[e.id] ?: e.hp, Modifier.centeredAt(anchor.x, anchor.y - 6))
+                var y = anchor.y - 4
+                while (placed.any { (px, py) -> kotlin.math.abs(px - anchor.x) < plateW && kotlin.math.abs(py - y) < plateH }) y -= plateH
+                placed += anchor.x to y
+                Nameplate(e, shownHp[e.id] ?: e.hp, e.id == targetId, Modifier.centeredAt(anchor.x, y))
             }
-            // Floating numbers.
             for (f in stage.floaters.toList()) {
                 val anchor = stage.anchor(f.unitId, w, h, unitPx) ?: continue
                 androidx.compose.runtime.key(f.key) { FloatText(f.text, f.color, f.big, anchor.x, anchor.y + unitPx) { stage.floaters.remove(f) } }
             }
-            RowC(Modifier.align(Alignment.TopCenter).padding(10.dp)) {
-                T(if (b.isBoss) "BOSS BATTLE" else region.name, 16.sp, Sq.gold, bold = true, serif = true, modifier = Modifier.weight(1f))
-                Column(horizontalAlignment = Alignment.End) {
-                    val a = s.ledger.bankedActions
-                    T(if (a == 1) "1 action" else "$a actions", 18.sp, bold = true)
-                    Tiny("${n(s.ledger.stepsToNextAction)} steps to next", Sq.text)
-                }
+            // Target frame (top-left) and zone text (top-right).
+            b.unit(targetId)?.let { TargetFrame(b, it, shownHp[it.id] ?: it.hp, Modifier.align(Alignment.TopStart).padding(10.dp)) }
+            Column(Modifier.align(Alignment.TopEnd).padding(10.dp).background(Color(0x99080503), androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
+                .padding(horizontal = 8.dp, vertical = 4.dp), horizontalAlignment = Alignment.End) {
+                T(if (b.isBoss) "Boss Encounter" else region.name, 14.sp, if (b.isBoss) Color(0xFFFF7A4A) else Sq.gold, bold = true)
+                Tiny("Round ${b.round}", Sq.text)
             }
         }
 
-        Column(Modifier.weight(0.54f).vscroll().padding(horizontal = 12.dp, vertical = 6.dp)) {
+        Column(Modifier.weight(0.56f).vscroll().padding(horizontal = 10.dp, vertical = 6.dp)) {
             TurnStrip(b)
-            Panel {
-                for (u in b.heroes) HeroRow(b, u, shownHp[u.id] ?: u.hp, shownMp[u.id] ?: u.mp, !busy && b.currentActor == u)
-                if (log.isNotEmpty() || b.log.isNotEmpty()) Tiny(log.ifEmpty { b.log.last().text }, Sq.muted)
+            // Party unit frames, two per row.
+            b.heroes.chunked(2).forEach { row ->
+                Row(Modifier.fillMaxWidth()) {
+                    row.forEach { u -> UnitFrame(b, u, shownHp[u.id] ?: u.hp, shownMp[u.id] ?: u.mp, !busy && b.currentActor == u,
+                        selectable = mode == Mode.Target && validTargets(b, pendingTarget).any { it.id == u.id },
+                        modifier = Modifier.weight(1f)) { pending?.let { execute(it.copy(targetId = u.id)) } } }
+                    if (row.size == 1) Spacer(Modifier.weight(1f))
+                }
             }
+            if (log.isNotEmpty() || b.log.isNotEmpty())
+                T(log.ifEmpty { b.log.last().text }, 12.sp, Color(0xFFFFD100), modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp))
+
             val actor = b.currentActor
             if (s.ledger.bankedActions <= 0 && !busy) {
                 Panel(glow = true) {
                     H2("Out of actions")
                     Small("Your party holds its ground. Every 1,000 steps you walk gives them another action — the battle will wait for you.", Sq.text)
                     Spacer(Modifier.height(6.dp))
-                    Bar(s.ledger.stepRemainder / StepLedger.STEPS_PER_ACTION.toFloat(), height = 14.dp)
                     Btn("Return to town", Modifier.fillMaxWidth()) { nav.screen = Screen.Home }
                     if (s.data.settings.debugTools) Btn("+1k steps (debug)", small = true, ghost = true) { s.addDebugSteps(1000) }
                 }
             } else if (actor != null && actor.isHero && !busy) {
                 val hero = s.party[actor.heroIndex]
-                FlowRow(Modifier.fillMaxWidth()) {
-                    val cell = Modifier.fillMaxWidth(0.33f)
-                    val half = Modifier.fillMaxWidth(0.5f)
-                    when (mode) {
-                        Mode.Root -> {
-                            Btn("Attack", cell, primary = true) { beginTarget(BattleCommand.attack(-1), TargetKind.SingleEnemy) }
-                            Btn("Skills", cell) { mode = Mode.Skills }
-                            Btn("Defend", cell) { execute(BattleCommand.defend()) }
-                            Btn("Items", half) { mode = Mode.Items }
-                            Btn("Flee", half, enabled = !b.isBoss, ghost = true) { execute(BattleCommand.flee()) }
+                when (mode) {
+                    Mode.Target -> Panel(inset = true) {
+                        H3(if (pendingTarget == TargetKind.DeadAlly) "Choose a fallen ally" else "Choose an ally", Sq.gold)
+                        Small("Tap a party frame above.")
+                        Btn("Cancel", small = true, ghost = true) { mode = if (pending?.kind == CommandKind.Item) Mode.Items else Mode.Root; pending = null }
+                    }
+                    Mode.Items -> ActionBar("Bags — ${actor.name}") {
+                        s.inventory.items.toSortedMap().forEach { (id, count) ->
+                            val item = GameData.itemOrNull(id) ?: return@forEach
+                            if (!item.isConsumable) return@forEach
+                            val icon = when (item.use) { ConsumableEffect.HealHp -> "heart"; ConsumableEffect.HealMp -> "ice"; ConsumableEffect.Revive -> "holy"; else -> "leaf" }
+                            ActionSlot(icon, item.name, count.toString()) { use(BattleCommand.item(id, -1), if (item.use == ConsumableEffect.Revive) TargetKind.DeadAlly else TargetKind.SingleAlly) }
                         }
-                        Mode.Skills -> {
-                            for (sk in hero.skills()) Btn("${sk.name} · ${sk.mpCost} MP", half, enabled = actor.mp >= sk.mpCost, small = true) { chooseSkill(sk, ::execute, ::beginTarget) }
-                            Btn("< Back", half, ghost = true, small = true) { mode = Mode.Root }
-                        }
-                        Mode.Items -> {
-                            s.inventory.items.toSortedMap().forEach { (id, count) ->
-                                val item = GameData.itemOrNull(id)
-                                if (item != null && item.isConsumable) Btn("${item.name} ×$count", half, small = true) {
-                                    beginTarget(BattleCommand.item(id, -1), if (item.use == ConsumableEffect.Revive) TargetKind.DeadAlly else TargetKind.SingleAlly)
-                                }
-                            }
-                            Btn("< Back", half, ghost = true, small = true) { mode = Mode.Root }
-                        }
-                        Mode.Target -> {
-                            for (t in validTargets(b, pendingTarget))
-                                Btn(t.name + if (t.isHero) "  ${t.hp}/${t.stats.maxHp}" else "", half, small = true) { pending?.let { execute(it.copy(targetId = t.id)) } }
-                            Btn("< Back", half, ghost = true, small = true) {
-                                mode = when (pending?.kind) { CommandKind.Skill -> Mode.Skills; CommandKind.Item -> Mode.Items; else -> Mode.Root }
-                                pending = null
-                            }
-                        }
+                        ActionSlot("home", "Back", null) { mode = Mode.Root }
+                    }
+                    else -> ActionBar("${actor.name}'s abilities") {
+                        ActionSlot("sword", "Attack", null, primary = true) { use(BattleCommand.attack(-1), TargetKind.SingleEnemy) }
+                        for (sk in hero.skills())
+                            ActionSlot(skillIcon(sk), sk.name, sk.mpCost.toString(), enabled = actor.mp >= sk.mpCost, costIsMana = true) { use(BattleCommand.skill(sk.id), sk.target) }
+                        ActionSlot("helm", "Defend", null) { execute(BattleCommand.defend()) }
+                        ActionSlot("bag", "Items", null) { mode = Mode.Items }
+                        ActionSlot("boot", "Flee", null, enabled = !b.isBoss) { execute(BattleCommand.flee()) }
                     }
                 }
-                if (mode == Mode.Skills) Tiny("Tip: hitting a weakness lowers the shield. At zero the enemy is BROKEN — it loses a turn and takes double damage.")
-                if (mode == Mode.Root) Tiny("Tip: tap an enemy to attack it directly.")
+                Tiny("Tap an enemy to target it. Hitting a weakness (?) cracks its shield; at zero it's BROKEN and takes double damage.",
+                    modifier = Modifier.padding(4.dp))
             }
         }
     }
 }
+
+private fun skillIcon(sk: SkillDef) = when (sk.effect) {
+    SkillEffect.Heal, SkillEffect.Regen -> "heart"
+    SkillEffect.Revive -> "holy"
+    SkillEffect.BuffDef, SkillEffect.Taunt -> "helm"
+    SkillEffect.BuffAtk -> "flame"
+    SkillEffect.StealCoins -> "coin"
+    SkillEffect.Poison -> if (sk.element == Element.Nature) "leaf" else "dark"
+    SkillEffect.Damage -> PixelArt.elementIcon(sk.element)
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ActionBar(title: String, content: @Composable () -> Unit) =
+    Column(Modifier.fillMaxWidth().padding(top = 4.dp).mmoFrame(Interior.Slate, band = 2.5.dp, seed = 8).padding(8.dp)) {
+        T(title, 12.sp, Sq.gold, bold = true, modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
+        FlowRow(Modifier.fillMaxWidth()) { content() }
+    }
+
+/** A square ability slot: icon, name underneath, cost in the corner. */
+@Composable
+private fun ActionSlot(icon: String, name: String, corner: String?, enabled: Boolean = true, primary: Boolean = false, costIsMana: Boolean = false, onClick: () -> Unit) =
+    Column(Modifier.width(58.dp).padding(2.dp).clickable(enabled = enabled, onClick = onClick), horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(Modifier.size(50.dp).mmoFrame(if (primary) Interior.Crimson else Interior.Bronze, band = 2.dp, radius = 3.dp, rivets = false)
+            .drawWithContent { drawContent(); if (!enabled) drawRect(Color.Black.copy(alpha = 0.6f)) }, contentAlignment = Alignment.Center) {
+            Icon(icon, 32.dp)
+            if (corner != null) T(corner, 11.sp, if (costIsMana) Color(0xFF8FB8FF) else Color.White, bold = true, serif = false,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 4.dp, bottom = 1.dp))
+        }
+        T(name, 10.sp, if (enabled) Sq.text else Sq.muted, maxLines = 1, align = TextAlign.Center)
+    }
 
 private fun chooseSkill(sk: SkillDef, execute: (BattleCommand) -> Unit, beginTarget: (BattleCommand, TargetKind) -> Unit) {
     val cmd = BattleCommand.skill(sk.id)
@@ -236,23 +283,46 @@ private fun Modifier.centeredAt(x: Float, y: Float) = layout { m, c ->
 }
 
 @Composable
-private fun EnemyTag(b: Battle, e: Combatant, hp: Int, modifier: Modifier) {
-    Column(modifier.widthIn(min = 70.dp, max = 120.dp).clip(RoundedCornerShape(6.dp)).background(Color(0xCC080B16))
-        .border(1.dp, Color(0x99FF7864), RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 3.dp),
-        horizontalAlignment = Alignment.CenterHorizontally) {
-        T(e.name, 10.sp, align = TextAlign.Center, maxLines = 1)
-        Bar(hp / e.stats.maxHp.toFloat(), Sq.hp, 4.dp)
-        if (e.broken) T("BROKEN", 10.sp, Color(0xFFFFD86B), bold = true)
-        else Row(Modifier.padding(top = 2.dp)) {
-            repeat(e.maxShield) { i -> Box(Modifier.padding(0.5.dp).size(5.dp, 7.dp).clip(RoundedCornerShape(1.dp)).background(if (i < e.shield) Color(0xFF8FB4FF) else Color(0x26FFFFFF))) }
-        }
-        Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-            for (w in GameData.enemy(e.enemyId!!).weaknesses) {
-                if (b.isRevealed(e, w)) Icon(PixelArt.elementIcon(w), 14.dp) else T("?", 11.sp, Sq.gold, bold = true, modifier = Modifier.width(14.dp), align = TextAlign.Center)
+private fun Nameplate(e: Combatant, hp: Int, targeted: Boolean, modifier: Modifier) =
+    Column(modifier.width(92.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        T(e.name, 10.sp, if (targeted) Color(0xFFFFD100) else Color(0xFFFF6A5A), bold = true, maxLines = 1)
+        Bar(hp / e.stats.maxHp.toFloat(), Color(0xFFD4302A), 7.dp)
+        if (e.broken) T("BROKEN", 9.sp, Color(0xFFFFD86B), bold = true)
+    }
+
+/** MMO target frame: portrait ring, name, labelled HP, shield pips and weakness icons. */
+@Composable
+private fun TargetFrame(b: Battle, e: Combatant, hp: Int, modifier: Modifier) =
+    Row(modifier.width(220.dp).mmoFrame(Interior.Leather, band = 2.dp, radius = 5.dp, rivets = false).padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Portrait(PixelArt.enemy(e.enemyId!!), 42.dp, if (GameData.enemy(e.enemyId!!).isBoss) Color(0xFFFF7A4A) else Mmo.gold)
+        Column(Modifier.padding(start = 6.dp)) {
+            T(e.name, 12.sp, Color(0xFFFFD100), bold = true, maxLines = 1)
+            Bar(hp / e.stats.maxHp.toFloat(), Color(0xFFD4302A), 12.dp, label = "$hp / ${e.stats.maxHp}")
+            Row(Modifier.padding(top = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (e.broken) T("BROKEN ", 10.sp, Color(0xFFFFD86B), bold = true)
+                else repeat(e.maxShield) { i -> Box(Modifier.padding(end = 1.dp).size(7.dp, 10.dp).background(if (i < e.shield) Color(0xFF7FA8FF) else Color(0x33FFFFFF))) }
+                Spacer(Modifier.width(6.dp))
+                for (w in GameData.enemy(e.enemyId!!).weaknesses)
+                    if (b.isRevealed(e, w)) Icon(PixelArt.elementIcon(w), 14.dp) else T("?", 11.sp, Sq.gold, bold = true, modifier = Modifier.width(12.dp), align = TextAlign.Center)
             }
         }
     }
-}
+
+/** Round portrait in a gold ring. */
+@Composable
+private fun Portrait(bmp: android.graphics.Bitmap, size: androidx.compose.ui.unit.Dp, ring: Color, badge: String? = null) =
+    Box(Modifier.size(size), contentAlignment = Alignment.Center) {
+        Box(Modifier.fillMaxSize().clip(CircleShape).background(Brush.radialGradient(listOf(Color(0xFF3A3024), Color(0xFF0E0A08)))).padding(size / 10)) {
+            Pixel(bmp, Modifier.fillMaxSize())
+        }
+        Box(Modifier.fillMaxSize().drawWithContent {
+            drawCircle(Brush.sweepGradient(listOf(Color(0xFFFFE79A), ring, Mmo.goldDeep, ring, Color(0xFFFFE79A))), radius = drawContext.size.minDimension / 2 - 0.75.dp.toPx(), style = Stroke(1.5.dp.toPx()))
+        })
+        if (badge != null) Box(Modifier.align(Alignment.BottomStart).size(18.dp).clip(CircleShape).background(Color(0xFF1A0605))
+            .drawWithContent { drawCircle(Mmo.gold, radius = drawContext.size.minDimension / 2 - 0.5.dp.toPx(), style = Stroke(1.dp.toPx())); drawContent() }, contentAlignment = Alignment.Center) {
+            T(badge, 9.sp, Color(0xFFFFE08A), bold = true, serif = false)
+        }
+    }
 
 @Composable
 private fun FloatText(text: String, color: Color, big: Boolean, x: Float, y: Float, onDone: () -> Unit) {
@@ -267,34 +337,30 @@ private fun FloatText(text: String, color: Color, big: Boolean, x: Float, y: Flo
 @Composable
 private fun TurnStrip(b: Battle) {
     val order = listOfNotNull(b.currentActor) + b.upcomingTurns().take(7)
-    Row(Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xB3080B16)).padding(6.dp),
+    Row(Modifier.fillMaxWidth().padding(bottom = 6.dp).mmoFrame(Interior.Slate, band = 2.dp, radius = 4.dp, rivets = false).padding(6.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        Tiny("TURN ")
+        T("Turn order ", 10.sp, Sq.muted)
         order.forEachIndexed { i, u ->
             val bmp = if (u.isHero) PixelArt.hero(b.heroClasses[u.heroIndex]) else PixelArt.enemy(u.enemyId!!)
-            val sz = if (i == 0) 40.dp else 32.dp
-            Box(Modifier.padding(end = 4.dp).size(sz).clip(RoundedCornerShape(6.dp)).background(Color(0x66000000))
-                .border(1.5.dp, if (i == 0) Sq.gold else if (u.isHero) Color(0x9978B4FF) else Color(0x99FF6E5A), RoundedCornerShape(6.dp)).padding(2.dp)) {
-                Pixel(bmp, Modifier.fillMaxSize())
-            }
+            Box(Modifier.padding(end = 4.dp)) { Portrait(bmp, if (i == 0) 36.dp else 28.dp, if (i == 0) Mmo.gold else if (u.isHero) Color(0xFF6FA0FF) else Color(0xFFE0574A)) }
         }
     }
 }
 
+/** Party unit frame: portrait with level badge, name, labelled health and mana. */
 @Composable
-private fun HeroRow(b: Battle, u: Combatant, hp: Int, mp: Int, active: Boolean) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp).clip(RoundedCornerShape(6.dp))
-        .background(if (active) Sq.gold.copy(alpha = 0.18f) else Color.Transparent).alpha(if (u.isAlive || hp > 0) 1f else 0.45f)
-        .padding(horizontal = 6.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
-        Pixel(PixelArt.hero(b.heroClasses[u.heroIndex]), Modifier.size(24.dp, 30.dp))
-        T((if (active) "> " else "") + u.name + if (u.broken) " (broken)" else "", 13.sp, modifier = Modifier.width(118.dp).padding(start = 4.dp), maxLines = 1)
-        Column(Modifier.weight(1f)) {
-            val f = hp / u.stats.maxHp.toFloat()
-            Bar(f, if (f < 0.3f) Sq.danger else Sq.hp, 8.dp)
-            Spacer(Modifier.height(3.dp))
-            Bar(if (u.stats.maxMp == 0) 0f else mp / u.stats.maxMp.toFloat(), Sq.mp, 5.dp)
+private fun UnitFrame(b: Battle, u: Combatant, hp: Int, mp: Int, active: Boolean, selectable: Boolean, modifier: Modifier, onSelect: () -> Unit) {
+    val hero = Game.session.party[u.heroIndex]
+    Row(modifier.padding(2.dp).alpha(if (u.isAlive || hp > 0) 1f else 0.5f)
+        .mmoFrame(if (active) Interior.Bronze else if (selectable) Interior.Moss else Interior.Leather, band = 2.dp, radius = 5.dp, rivets = false)
+        .clickable(enabled = selectable, onClick = onSelect).padding(5.dp), verticalAlignment = Alignment.CenterVertically) {
+        Portrait(PixelArt.hero(b.heroClasses[u.heroIndex]), 40.dp, if (active) Color(0xFFFFE08A) else Mmo.gold, badge = hero.level.toString())
+        Column(Modifier.padding(start = 5.dp)) {
+            T(u.name, 11.sp, if (active) Color(0xFFFFE08A) else Sq.text, bold = true, maxLines = 1)
+            Bar(hp / u.stats.maxHp.toFloat(), if (hp < u.stats.maxHp * 0.3f) Color(0xFFD4302A) else Sq.hp, 12.dp, label = "$hp / ${u.stats.maxHp}")
+            Spacer(Modifier.height(2.dp))
+            Bar(if (u.stats.maxMp == 0) 0f else mp / u.stats.maxMp.toFloat(), Sq.mp, 9.dp, label = "$mp")
         }
-        T("$hp/${u.stats.maxHp}\n$mp MP", 10.sp, Sq.muted, modifier = Modifier.width(64.dp), align = TextAlign.End)
     }
 }
 

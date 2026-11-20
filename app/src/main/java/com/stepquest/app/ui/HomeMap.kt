@@ -1,6 +1,7 @@
 package com.stepquest.app.ui
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -33,7 +34,7 @@ fun HomeScreen(nav: Nav, stepPermission: Boolean, requestPermission: () -> Unit)
     LaunchedEffect(region.id, s.battle == null, v) { if (s.battle == null) nav.stage.showParty(s.party) else nav.stage.showBattle(s.battle!!) }
 
     Column(Modifier.fillMaxSize()) {
-        Box(Modifier.fillMaxWidth().weight(0.42f)) {
+        Box(Modifier.fillMaxWidth().weight(0.42f).drawWithContent { drawContent(); ironFrame(3.5.dp.toPx(), 0f, rivets = true) }) {
             Diorama(region, nav.stage)
             Column(Modifier.align(Alignment.BottomStart).padding(12.dp)) {
                 T(region.name, 22.sp, Sq.gold, bold = true, serif = true)

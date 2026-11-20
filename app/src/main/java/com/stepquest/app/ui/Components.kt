@@ -30,6 +30,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -41,15 +45,15 @@ import androidx.compose.ui.unit.sp
 import com.stepquest.app.art.PixelArt
 
 object Sq {
-    val ink = Color(0xFF0B1020)
-    val panel = Color(0xE60C1121)
-    val panel2 = Color(0xEB161E36)
-    val gold = Color(0xFFD8B765)
+    val ink = Color(0xFF0C0907)
+    val panel = Color(0xFF1E1711)
+    val panel2 = Color(0xFF2A2017)
+    val gold = Color(0xFFF0C75A)
     val goldDim = Color(0xFF8C6B3A)
     val text = Color(0xFFF3E9D2)
-    val muted = Color(0xFFB9AB8A)
-    val hp = Color(0xFF6FD36F)
-    val mp = Color(0xFF5AA8FF)
+    val muted = Color(0xFFBFAE8A)
+    val hp = Color(0xFF2FB83A)
+    val mp = Color(0xFF2F6BDB)
     val exp = Color(0xFFC79BFF)
     val danger = Color(0xFFE0574A)
     val good = Color(0xFF7BE08A)
@@ -63,66 +67,75 @@ object Sq {
     }
 }
 
-@Composable
-fun T(text: String, size: TextUnit = 15.sp, color: Color = Sq.text, bold: Boolean = false, serif: Boolean = false,
-      modifier: Modifier = Modifier, align: TextAlign? = null, maxLines: Int = Int.MAX_VALUE) =
-    Text(text, modifier, color = color, fontSize = size, maxLines = maxLines, textAlign = align,
-        style = TextStyle(fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal, fontFamily = if (serif) Sq.serif else FontFamily.Default))
+/** MMO-style lettering: serif with a hard black outline-like shadow. */
+private val outline = Shadow(Color.Black, Offset(1.5f, 1.5f), 2f)
 
-@Composable fun Title(text: String, modifier: Modifier = Modifier) = T(text, 24.sp, Sq.gold, bold = true, serif = true, modifier = modifier.padding(bottom = 6.dp))
-@Composable fun H2(text: String, modifier: Modifier = Modifier) = T(text, 18.sp, Sq.gold, bold = true, serif = true, modifier = modifier.padding(bottom = 4.dp))
+/**
+ * Text with a true dark outline (a stroke drawn under the fill), so it stays readable on any
+ * background, from bright bar fills to sky in the diorama.
+ */
+@Composable
+fun T(text: String, size: TextUnit = 15.sp, color: Color = Sq.text, bold: Boolean = false, serif: Boolean = true,
+      modifier: Modifier = Modifier, align: TextAlign? = null, maxLines: Int = Int.MAX_VALUE) {
+    val base = TextStyle(fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal, fontFamily = if (serif) Sq.serif else FontFamily.Default,
+        fontSize = size, textAlign = align ?: TextAlign.Unspecified)
+    val strokeW = (size.value * 0.22f).coerceIn(2f, 5f)
+    Box(modifier) {
+        Text(text, color = Color(0xF2080503), maxLines = maxLines, style = base.copy(drawStyle = androidx.compose.ui.graphics.drawscope.Stroke(strokeW, join = androidx.compose.ui.graphics.StrokeJoin.Round)))
+        Text(text, color = color, maxLines = maxLines, style = base.copy(shadow = outline))
+    }
+}
+
+@Composable fun Title(text: String, modifier: Modifier = Modifier) = T(text, 24.sp, Sq.gold, bold = true, modifier = modifier.padding(bottom = 6.dp))
+@Composable fun H2(text: String, modifier: Modifier = Modifier) = T(text, 18.sp, Sq.gold, bold = true, modifier = modifier.padding(bottom = 4.dp))
 @Composable fun H3(text: String, color: Color = Sq.text, modifier: Modifier = Modifier) = T(text, 16.sp, color, bold = true, modifier = modifier)
 @Composable fun Small(text: String, color: Color = Sq.muted, modifier: Modifier = Modifier) = T(text, 13.sp, color, modifier = modifier)
 @Composable fun Tiny(text: String, color: Color = Sq.muted, modifier: Modifier = Modifier) = T(text, 11.sp, color, modifier = modifier)
 
+/** Leather panel in a riveted iron frame. [inset] = slate, [glow] = bronze with a brighter trim. */
 @Composable
-fun Panel(modifier: Modifier = Modifier, inset: Boolean = false, glow: Boolean = false, content: @Composable ColumnScope.() -> Unit) =
+fun Panel(modifier: Modifier = Modifier, inset: Boolean = false, glow: Boolean = false, interior: Interior? = null, content: @Composable ColumnScope.() -> Unit) =
     Column(
-        modifier.fillMaxWidth().padding(bottom = 10.dp).clip(RoundedCornerShape(10.dp))
-            .background(if (inset) Sq.panel2 else Sq.panel)
-            .border(1.5.dp, if (glow) Sq.gold else Sq.goldDim, RoundedCornerShape(10.dp))
-            .padding(horizontal = 14.dp, vertical = 12.dp),
+        modifier.fillMaxWidth().padding(bottom = 10.dp)
+            .mmoFrame(interior ?: when { glow -> Interior.Bronze; inset -> Interior.Slate; else -> Interior.Leather }, band = 3.5.dp, seed = 1)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
         content = content,
     )
 
+/** A smaller framed row. Moss when done, dimmed when locked. */
 @Composable
 fun Card(modifier: Modifier = Modifier, done: Boolean = false, locked: Boolean = false, onClick: (() -> Unit)? = null, content: @Composable ColumnScope.() -> Unit) =
     Column(
-        modifier.fillMaxWidth().padding(bottom = 8.dp).alpha(if (locked) 0.55f else 1f).clip(RoundedCornerShape(8.dp))
-            .background(Sq.panel2)
-            .border(1.dp, if (done) Sq.good else Sq.gold.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+        modifier.fillMaxWidth().padding(bottom = 8.dp).alpha(if (locked) 0.55f else 1f)
+            .mmoFrame(if (done) Interior.Moss else Interior.Leather, band = 2.dp, radius = 4.dp, rivets = false, seed = 2)
             .let { if (onClick != null) it.clickable(onClick = onClick) else it }
             .padding(horizontal = 12.dp, vertical = 10.dp),
         content = content,
     )
 
+/** Bevelled metal button with gold lettering: crimson = primary/danger, bronze = selected. */
 @Composable
 fun Btn(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, primary: Boolean = false, danger: Boolean = false,
         ghost: Boolean = false, small: Boolean = false, selected: Boolean = false, onClick: () -> Unit) {
-    val bg = when {
-        selected -> Color(0xFF5A4320); primary -> Color(0xFF6B4F1D); danger -> Color(0xFF4A1A16)
-        ghost -> Color.Transparent; else -> Color(0xFF2B2416)
-    }
-    val border = when { danger -> Sq.danger; ghost -> Sq.goldDim; selected -> Color(0xFFFFF3CF); else -> Sq.gold }
+    val interior = when { primary || danger -> Interior.Crimson; selected -> Interior.Bronze; ghost -> Interior.Slate; else -> Interior.Leather }
     Box(
-        modifier.padding(3.dp).alpha(if (enabled) 1f else 0.4f).clip(RoundedCornerShape(8.dp)).background(bg)
-            .border(1.5.dp, border, RoundedCornerShape(8.dp))
+        modifier.padding(3.dp).alpha(if (enabled) 1f else 0.4f)
+            .mmoFrame(interior, band = if (small) 2.dp else 2.5.dp, radius = 5.dp, rivets = false, seed = 3)
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = if (small) 10.dp else 14.dp, vertical = if (small) 6.dp else 11.dp),
+            .padding(horizontal = if (small) 12.dp else 14.dp, vertical = if (small) 8.dp else 12.dp),
         contentAlignment = Alignment.Center,
-    ) { T(text, if (small) 13.sp else 15.sp, if (primary) Color(0xFFFFF3CF) else Sq.text, bold = true, align = TextAlign.Center) }
+    ) { T(text, if (small) 13.sp else 15.sp, if (primary || selected) Color(0xFFFFE08A) else Sq.gold, bold = true, align = TextAlign.Center) }
 }
 
+/** Glossy resource bar; optional [label] is drawn centred on it, MMO unit-frame style. */
 @Composable
-fun Bar(fraction: Float, color: Color = Sq.gold, height: Dp = 9.dp, modifier: Modifier = Modifier) {
+fun Bar(fraction: Float, color: Color = Sq.gold, height: Dp = 9.dp, modifier: Modifier = Modifier, label: String? = null, ticks: Int = 0) {
     val f by animateFloatAsState(fraction.coerceIn(0f, 1f), label = "bar")
-    Box(modifier.fillMaxWidth().height(height).clip(RoundedCornerShape(height / 2)).background(Color(0x8C000000))
-        .border(0.5.dp, Color(0x1FFFFFFF), RoundedCornerShape(height / 2))) {
-        Box(Modifier.fillMaxWidth(f).fillMaxHeight().clip(RoundedCornerShape(height / 2)).background(color))
+    Box(modifier.fillMaxWidth().height(height), contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) { resourceBar(f, color, ticks) }
+        if (label != null) T(label, (height.value * 0.62f).sp, Color.White, bold = true, serif = false)
     }
 }
-
-
 
 @Composable
 fun Pixel(bitmap: Bitmap, modifier: Modifier = Modifier) {

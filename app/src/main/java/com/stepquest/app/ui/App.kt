@@ -10,7 +10,13 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.drawscope.Stroke
+import com.stepquest.core.steps.StepLedger
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -67,6 +73,7 @@ fun StepQuestApp(stepPermission: Boolean, requestPermission: () -> Unit) {
     BackHandler(nav.screen != Screen.Home) { nav.screen = if (Game.session.battle != null && nav.screen == Screen.Settings) Screen.Battle else Screen.Home }
 
     Box(Modifier.fillMaxSize().background(Sq.ink)) {
+        HallBackground()
         Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars)) {
             TopBar(nav)
             Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -81,6 +88,7 @@ fun StepQuestApp(stepPermission: Boolean, requestPermission: () -> Unit) {
                     Screen.Settings -> SettingsScreen(nav, stepPermission, requestPermission)
                 }
             }
+            StepBar()
             if (nav.screen != Screen.Battle) NavBar(nav)
             Spacer(Modifier.windowInsetsPadding(WindowInsets.navigationBars))
         }
@@ -93,37 +101,64 @@ fun StepQuestApp(stepPermission: Boolean, requestPermission: () -> Unit) {
 private fun TopBar(nav: Nav) {
     val s = Game.session
     @Suppress("UNUSED_VARIABLE") val v = Game.version
-    Row(Modifier.fillMaxWidth().background(Color(0xD9080B16)).padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Chip("TODAY", n(s.todaySteps), Modifier.weight(1f))
-        Chip("ACTIONS", s.ledger.bankedActions.toString(), Modifier.weight(1f), Sq.gold, big = true)
-        Chip("COINS", n(s.inventory.coins), Modifier.weight(1f))
-        Chip("STREAK", s.streak.current.let { if (it > 0) "$it" else "-" }, Modifier.weight(1f))
-        Box(Modifier.clip(RoundedCornerShape(8.dp)).clickable { nav.screen = Screen.Settings }.padding(6.dp)) { Icon("gear", 26.dp) }
+    Row(Modifier.fillMaxWidth().mmoFrame(Interior.Leather, band = 2.5.dp, radius = 0.dp, rivets = true, seed = 9).padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        // Gold-ringed badge holding your banked actions, like a level badge on a portrait.
+        Box(Modifier.size(58.dp).drawBehind {
+            drawCircle(Brush.radialGradient(listOf(Color(0xFF5A1712), Color(0xFF1A0605))))
+            drawCircle(Brush.sweepGradient(listOf(Color(0xFFFFE79A), Mmo.gold, Mmo.goldDeep, Mmo.gold, Color(0xFFFFE79A))), radius = size.minDimension / 2 - 1.25.dp.toPx(), style = Stroke(2.5.dp.toPx()))
+        }, contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                T(s.ledger.bankedActions.toString(), 22.sp, Color(0xFFFFE08A), bold = true)
+                T("ACTIONS", 7.sp, Sq.muted, serif = false)
+            }
+        }
+        Stat("boot", n(s.todaySteps), "steps today", Modifier.weight(1f))
+        Stat("coin", n(s.inventory.coins), "gold", Modifier.weight(1f))
+        Stat("flame", s.streak.current.toString(), "day streak", Modifier.weight(0.8f))
+        Box(Modifier.size(42.dp).mmoFrame(Interior.Slate, band = 2.dp, radius = 4.dp, rivets = false).clickable { nav.screen = Screen.Settings },
+            contentAlignment = Alignment.Center) { Icon("gear", 24.dp) }
     }
-    Box(Modifier.fillMaxWidth().height(1.dp).background(Sq.goldDim))
 }
 
 @Composable
-private fun Chip(label: String, value: String, modifier: Modifier, color: Color = Sq.text, big: Boolean = false) =
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        T(value, if (big) 22.sp else 17.sp, color, bold = true)
-        T(label, 9.sp, Sq.muted)
+private fun Stat(icon: String, value: String, label: String, modifier: Modifier) =
+    Row(modifier.padding(start = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, 22.dp)
+        Column(Modifier.padding(start = 5.dp)) {
+            T(value, 15.sp, Sq.text, bold = true, maxLines = 1)
+            T(label, 9.sp, Sq.muted, serif = false, maxLines = 1)
+        }
     }
+
+/** The "experience bar" of StepQuest: 20 segments filling toward your next action. */
+@Composable
+private fun StepBar() {
+    val s = Game.session
+    @Suppress("UNUSED_VARIABLE") val v = Game.version
+    val l = s.ledger
+    Box(Modifier.fillMaxWidth().background(Color(0xFF0A0806)).padding(horizontal = 6.dp, vertical = 3.dp)) {
+        Bar(l.stepRemainder / StepLedger.STEPS_PER_ACTION.toFloat(), Color(0xFFB04AD0), 14.dp,
+            label = "${n(l.stepRemainder)} / ${n(StepLedger.STEPS_PER_ACTION)} steps to next action", ticks = 20)
+    }
+}
 
 @Composable
 private fun NavBar(nav: Nav) {
     val s = Game.session
     val claimable = s.activeQuests.any { !s.isClaimed(it) && s.questProgress(it) >= it.target }
-    Box(Modifier.fillMaxWidth().height(1.dp).background(Sq.goldDim))
-    Row(Modifier.fillMaxWidth().background(Color(0xF0080B16)).padding(vertical = 6.dp)) {
+    // Micro-menu: square framed slots, the active one glowing gold.
+    Row(Modifier.fillMaxWidth().background(Color(0xFF0A0806)).padding(horizontal = 6.dp, vertical = 6.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
         for (sc in listOf(Screen.Home, Screen.Map, Screen.Party, Screen.Shop, Screen.Quests, Screen.Trophies)) {
             val active = nav.screen == sc
-            Column(Modifier.weight(1f).clickable { nav.screen = sc }.padding(vertical = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Box {
-                    Icon(sc.icon, if (active) 30.dp else 26.dp)
-                    if (sc == Screen.Quests && claimable) Box(Modifier.align(Alignment.TopEnd).clip(RoundedCornerShape(6.dp)).background(Sq.danger).padding(horizontal = 4.dp)) { T("!", 10.sp, bold = true) }
+            Column(Modifier.weight(1f).clickable { nav.screen = sc }, horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(Modifier.size(46.dp).mmoFrame(if (active) Interior.Bronze else Interior.Slate, band = 2.dp, radius = 4.dp, rivets = false)
+                    .drawBehind { if (active) drawRect(Brush.radialGradient(listOf(Color(0x66FFD86B), Color.Transparent))) },
+                    contentAlignment = Alignment.Center) {
+                    Icon(sc.icon, 28.dp)
+                    if (sc == Screen.Quests && claimable) T("!", 18.sp, Color(0xFFFFD100), bold = true, modifier = Modifier.align(Alignment.TopEnd).padding(end = 4.dp))
                 }
-                T(sc.label, 11.sp, if (active) Sq.gold else Sq.muted)
+                T(sc.label, 10.sp, if (active) Sq.gold else Sq.muted, maxLines = 1)
             }
         }
     }
@@ -138,8 +173,8 @@ private fun Toasts() {
                 var shown by remember { mutableStateOf(false) }
                 LaunchedEffect(t.id) { shown = true; delay(3000); shown = false; delay(400); list.remove(t) }
                 AnimatedVisibility(shown, enter = fadeIn() + slideInVertically(), exit = fadeOut()) {
-                    Column(Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xF2140F08))
-                        .border(1.5.dp, Sq.gold, RoundedCornerShape(12.dp)).padding(12.dp)) {
+                    Column(Modifier.fillMaxWidth().padding(bottom = 8.dp).mmoFrame(Interior.Bronze, band = 2.5.dp, seed = 4)
+                        .padding(horizontal = 14.dp, vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         H3(t.title, Sq.gold)
                         t.body?.let { Small(it, Sq.text) }
                     }
@@ -154,7 +189,7 @@ private fun Toasts() {
 @Composable
 private fun DialogView(nav: Nav, d: Dialog) {
     Box(Modifier.fillMaxSize().background(Color(0x99000000)).clickable(enabled = true) {}.padding(28.dp), contentAlignment = Alignment.Center) {
-        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Sq.panel).border(1.5.dp, Sq.gold, RoundedCornerShape(14.dp)).padding(20.dp)) {
+        Column(Modifier.fillMaxWidth().mmoFrame(Interior.Leather, band = 3.5.dp, radius = 8.dp, seed = 6).padding(20.dp)) {
             Title(d.title)
             Box(Modifier.weight(1f, fill = false)) { Column(Modifier.vscroll()) { d.body() } }
             Spacer(Modifier.height(10.dp))
