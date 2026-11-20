@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.StepQuest" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/sq_ink</item>
+        <item name="android:statusBarColor">@color/sq_ink</item>
+        <item name="android:navigationBarColor">@color/sq_ink</item>
+    </style>
+    <color name="sq_ink">#0B1020</color>
+    <color name="sq_gold">#D8B765</color>
+</resources>

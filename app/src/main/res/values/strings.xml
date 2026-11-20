@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">StepQuest</string>
+    <string name="sq_widget_description">Today\'s steps and the actions your party has ready.</string>
+    <string name="sq_widget_today">TODAY</string>
+    <string name="sq_widget_actions">ACTIONS</string>
+</resources>
