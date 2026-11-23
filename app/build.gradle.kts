@@ -36,6 +36,14 @@ android {
     testOptions { unitTests.isReturnDefaultValues = true }
 }
 
+// Game state lives in plain mutable objects (Hero, Inventory, ...). Strong skipping would memoize
+// UI blocks that capture those same objects and skip redrawing them after a change (e.g. learning a
+// skill left the skill-point count stale), so it is turned off for this app.
+composeCompiler {
+    @Suppress("DEPRECATION")
+    enableStrongSkippingMode = false
+}
+
 dependencies {
     implementation(project(":core"))
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
