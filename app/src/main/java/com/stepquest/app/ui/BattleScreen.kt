@@ -158,17 +158,11 @@ fun BattleScreen(nav: Nav) {
                 if (mode == Mode.Target && validTargets(b, pendingTarget).any { it.id == id }) pending?.let { execute(it.copy(targetId = id)) }
                 else if (!unit.isHero && unit.isAlive) targetId = id
             })
-            // Nameplates over enemies, nudged so they never overlap.
-            val density = LocalDensity.current
-            val plateW = with(density) { 96.dp.toPx() }; val plateH = with(density) { 26.dp.toPx() }
-            val placed = mutableListOf<Pair<Float, Float>>()
-            for (e in b.enemies.sortedByDescending { stage.anchor(it.id, w, h, unitPx)?.y ?: 0f }) {
-                if ((!e.isAlive && !busy) || (stage.fade[e.id] ?: 1f) < 0.05f) continue
-                val anchor = stage.anchor(e.id, w, h, unitPx) ?: continue
-                var y = anchor.y - 4
-                while (placed.any { (px, py) -> kotlin.math.abs(px - anchor.x) < plateW && kotlin.math.abs(py - y) < plateH }) y -= plateH
-                placed += anchor.x to y
-                Nameplate(e, shownHp[e.id] ?: e.hp, e.id == targetId, Modifier.centeredAt(anchor.x, y))
+            // Nameplates over enemies, laid out so they never overlap each other or the HUD.
+            val plates = b.enemies.filter { (it.isAlive || busy) && (stage.fade[it.id] ?: 1f) >= 0.05f }
+                .mapNotNull { e -> stage.anchor(e.id, w, h, unitPx)?.let { e to it } }
+            NameplateLayer(plates.map { it.second }) {
+                plates.forEach { (e, _) -> Nameplate(e, shownHp[e.id] ?: e.hp, e.id == targetId, Modifier) }
             }
             for (f in stage.floaters.toList()) {
                 val anchor = stage.anchor(f.unitId, w, h, unitPx) ?: continue
@@ -290,6 +284,25 @@ private fun validTargets(b: Battle, k: TargetKind): List<Combatant> = when (k) {
 private fun Modifier.centeredAt(x: Float, y: Float) = layout { m, c ->
     val p = m.measure(c.copy(minWidth = 0, minHeight = 0))
     layout(c.maxWidth, c.maxHeight) { p.place((x - p.width / 2).toInt(), (y - p.height).toInt()) }
+}
+
+/**
+ * Places each nameplate centred above its enemy's head, front-most enemies first. A plate that
+ * would collide with one already placed (or with the target frame / zone name) moves up past it;
+ * if there's no room above, it slides sideways to the nearest free spot.
+ */
+@Composable
+private fun NameplateLayer(anchors: List<androidx.compose.ui.geometry.Offset>, content: @Composable () -> Unit) {
+    androidx.compose.ui.layout.Layout(content, Modifier.fillMaxSize()) { measurables, c ->
+        val ps = measurables.map { it.measure(androidx.compose.ui.unit.Constraints()) }
+        val obstacles = listOf( // HUD over the diorama: target frame (top-left), zone name (top-right)
+            PRect(0, 0, 240.dp.roundToPx(), 86.dp.roundToPx()),
+            PRect(c.maxWidth - 180.dp.roundToPx(), 0, c.maxWidth, 64.dp.roundToPx()),
+        )
+        val result = placePlates(anchors.map { it.x to it.y }, ps.map { it.width to it.height }, c.maxWidth,
+            obstacles, gap = 6.dp.roundToPx(), minTop = 6.dp.roundToPx(), areaHeight = c.maxHeight - 6.dp.roundToPx())
+        layout(c.maxWidth, c.maxHeight) { ps.forEachIndexed { i, p -> p.place(result[i].l, result[i].t) } }
+    }
 }
 
 @Composable
